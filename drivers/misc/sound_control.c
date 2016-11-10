@@ -13,27 +13,28 @@
 #include <linux/sound_control.h>
 
 #define MAX_VALUE 20
+#define MIN_VALUE -20
 
 /*
  * Heaphones
  */
-unsigned int headphones_boost = 0;
+int headphones_boost = 0;
 
 /*
  * Mic
  */
-unsigned int mic_boost = 0;
+int mic_boost = 0;
 
 /*
  * Camera mic
  */
-unsigned int camera_mic_boost = 0;
+int camera_mic_boost = 0;
 
 /*
  * Speakers
  */
-unsigned int speaker_l_boost = 0;
-unsigned int speaker_r_boost = 0;
+int speaker_l_boost = 0;
+int speaker_r_boost = 0;
 
 /*
  * Sysfs get/set entries
@@ -49,13 +50,13 @@ static ssize_t headphones_boost_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
 	int ret;
-	unsigned long val;
+	long val;
 
-	ret = kstrtoul(buf, 0, &val);
+	ret = kstrtol(buf, 0, &val);
 	if (ret < 0)
 		return ret;
 
-	headphones_boost = val > MAX_VALUE ? MAX_VALUE : val;
+	headphones_boost = val < MIN_VALUE ? MIN_VALUE : (val > MAX_VALUE ? MAX_VALUE : val);
 
 	update_headphones_volume_boost(headphones_boost);
 
@@ -73,13 +74,13 @@ static ssize_t mic_boost_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
 	int ret;
-        unsigned long val;
+        long val;
 
-        ret = kstrtoul(buf, 0, &val);
+        ret = kstrtol(buf, 0, &val);
         if (ret < 0)
                 return ret;
 
-        mic_boost = val > MAX_VALUE ? MAX_VALUE : val;
+        mic_boost = val < MIN_VALUE ? MIN_VALUE : (val > MAX_VALUE ? MAX_VALUE : val);
 
         update_mic_gain(mic_boost);
 
@@ -97,13 +98,13 @@ static ssize_t camera_mic_boost_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
 	int ret;
-        unsigned long val;
+        long val;
 
-        ret = kstrtoul(buf, 0, &val);
+        ret = kstrtol(buf, 0, &val);
         if (ret < 0)
                 return ret;
 
-        camera_mic_boost = val > MAX_VALUE ? MAX_VALUE : val;
+        camera_mic_boost = val < MIN_VALUE ? MIN_VALUE : (val > MAX_VALUE ? MAX_VALUE : val);
 
         update_camera_mic_gain(camera_mic_boost);
 
@@ -121,13 +122,13 @@ static ssize_t speaker_l_boost_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
 	int ret;
-        unsigned long val;
+        long val;
 
-        ret = kstrtoul(buf, 0, &val);
+        ret = kstrtol(buf, 0, &val);
         if (ret < 0)
                 return ret;
 
-        speaker_l_boost = val > MAX_VALUE ? MAX_VALUE : val;
+        speaker_l_boost = val < MIN_VALUE ? MIN_VALUE : (val > MAX_VALUE ? MAX_VALUE : val);
 
         update_speakers_l_gain(speaker_l_boost);
 
@@ -145,13 +146,13 @@ static ssize_t speaker_r_boost_store(struct device *dev,
                 struct device_attribute *attr, const char *buf, size_t size)
 {
 	int ret;
-        unsigned long val;
+        long val;
 
-        ret = kstrtoul(buf, 0, &val);
+        ret = kstrtol(buf, 0, &val);
         if (ret < 0)
                 return ret;
 
-        speaker_r_boost = val > MAX_VALUE ? MAX_VALUE : val;
+        speaker_r_boost = val < MIN_VALUE ? MIN_VALUE : (val > MAX_VALUE ? MAX_VALUE : val);
 
         update_speakers_r_gain(speaker_r_boost);
 
