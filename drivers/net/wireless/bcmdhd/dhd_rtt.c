@@ -437,7 +437,7 @@ rate_mcs2rate(uint mcs, uint nss, uint bw, int sgi)
 int
 rate_rspec2rate(uint32 rspec)
 {
-	int rate = -1;
+	int rate = 0;
 
 	if (RSPEC_ISLEGACY(rspec)) {
 		rate = 500 * (rspec & WL_RSPEC_RATE_MASK);
@@ -465,7 +465,7 @@ rate_rspec2rate(uint32 rspec)
 		DHD_WARN(0,);
 	}
 
-	return (rate == 0) ? -1 : rate;
+	return rate;
 }
 
 char resp_buf[WLC_IOCTL_SMLEN];
@@ -809,7 +809,8 @@ dhd_rtt_common_set_handler(dhd_pub_t *dhd, const ftm_subcmd_info_t *p_subcmd_inf
 		return BCME_NOMEM;
 
 	/* no TLV to pack, simply issue a set-proxd iovar */
-	ret = dhd_iovar(dhd, 0, "proxd", (void *) p_proxd_iov, proxd_iovsize, 1);
+	ret = dhd_iovar(dhd, 0, "proxd", (char *)p_proxd_iov, proxd_iovsize,
+			NULL, 0, TRUE);
 #ifdef RTT_DEBUG
 	if (ret != BCME_OK) {
 		DHD_RTT(("error: IOVAR failed, status=%d\n", ret));
@@ -1060,7 +1061,8 @@ dhd_rtt_ftm_config(dhd_pub_t *dhd, wl_proxd_session_id_t session_id,
 		all_tlvsize = (bufsize - buf_space_left);
 		p_proxd_iov->len = htol16(all_tlvsize + WL_PROXD_IOV_HDR_SIZE);
 		ret = dhd_iovar(dhd, 0, "proxd", (char *)p_proxd_iov,
-			all_tlvsize + WL_PROXD_IOV_HDR_SIZE, 1);
+				all_tlvsize + WL_PROXD_IOV_HDR_SIZE, NULL, 0,
+				TRUE);
 		if (ret != BCME_OK) {
 			DHD_ERROR(("%s : failed to set config\n", __FUNCTION__));
 		}
@@ -1262,7 +1264,8 @@ dhd_rtt_start(dhd_pub_t *dhd)
 	}
 	/* turn off mpc in case of non-associted */
 	if (!dhd_is_associated(dhd, NULL, NULL)) {
-		err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc, sizeof(mpc), 1);
+		err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc, sizeof(mpc), NULL,
+				0, TRUE);
 		if (err) {
 			DHD_ERROR(("%s : failed to set mpc\n", __FUNCTION__));
 			goto exit;
@@ -1270,6 +1273,7 @@ dhd_rtt_start(dhd_pub_t *dhd)
 		rtt_status->mpc = 1; /* Either failure or complete, we need to enable mpc */
 	} else {
 		/* Save the current power mode */
+		rtt_status->pm = PM_OFF;
 		err = wldev_ioctl(dev, WLC_GET_PM, &rtt_status->pm, sizeof(rtt_status->pm), false);
 		if (err) {
 			DHD_ERROR(("Failed to get the PM value\n"));
@@ -1435,7 +1439,8 @@ exit:
 			/* enable mpc again in case of error */
 			mpc = 1;
 			rtt_status->mpc = 0;
-			err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc, sizeof(mpc), 1);
+			err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc,
+					sizeof(mpc), NULL, 0, TRUE);
 		}
 		if (rtt_status->pm_restore) {
 			pm = PM_FAST;
@@ -1510,18 +1515,38 @@ static wifi_rate_t
 dhd_rtt_convert_rate_to_host(uint32 rspec)
 {
 	wifi_rate_t host_rate;
+	uint32 bandwidth;
 	memset(&host_rate, 0, sizeof(wifi_rate_t));
-	if ((rspec & WL_RSPEC_ENCODING_MASK) == WL_RSPEC_ENCODE_RATE) {
+	if (RSPEC_ISLEGACY(rspec)) {
 		host_rate.preamble = 0;
-	} else if ((rspec & WL_RSPEC_ENCODING_MASK) == WL_RSPEC_ENCODE_HT) {
+	} else if (RSPEC_ISHT(rspec)) {
 		host_rate.preamble = 2;
 		host_rate.rateMcsIdx = rspec & WL_RSPEC_RATE_MASK;
-	} else if ((rspec & WL_RSPEC_ENCODING_MASK) == WL_RSPEC_ENCODE_VHT) {
+	} else if (RSPEC_ISVHT(rspec)) {
 		host_rate.preamble = 3;
 		host_rate.rateMcsIdx = rspec & WL_RSPEC_VHT_MCS_MASK;
 		host_rate.nss = (rspec & WL_RSPEC_VHT_NSS_MASK) >> WL_RSPEC_VHT_NSS_SHIFT;
 	}
-	host_rate.bw = (rspec & WL_RSPEC_BW_MASK) - 1;
+
+	bandwidth = RSPEC_BW(rspec);
+	switch (bandwidth) {
+	case WL_RSPEC_BW_20MHZ:
+		host_rate.bw = RTT_RATE_20M;
+		break;
+	case WL_RSPEC_BW_40MHZ:
+		host_rate.bw = RTT_RATE_40M;
+		break;
+	case WL_RSPEC_BW_80MHZ:
+		host_rate.bw = RTT_RATE_80M;
+		break;
+	case WL_RSPEC_BW_160MHZ:
+		host_rate.bw = RTT_RATE_160M;
+		break;
+	default:
+		host_rate.bw = RTT_RATE_20M;
+		break;
+	}
+
 	host_rate.bitrate = rate_rspec2rate(rspec) / 100; /* 100kbps */
 	DHD_RTT(("bit rate : %d\n", host_rate.bitrate));
 	return host_rate;
@@ -1691,6 +1716,10 @@ dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 			return ret;
 		}
 	}
+	if (!event_data) {
+		DHD_ERROR(("%s: event_data:NULL\n", __FUNCTION__));
+		return -EINVAL;
+	}
 	p_event = (wl_proxd_event_t *) event_data;
 	version = ltoh16(p_event->version);
 	if (version < WL_PROXD_API_VERSION) {
@@ -1713,6 +1742,11 @@ dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 		goto exit;	/* ignore this event */
 	}
 	/* get TLVs len, skip over event header */
+	if (ltoh16(p_event->len) < OFFSETOF(wl_proxd_event_t, tlvs)) {
+		DHD_ERROR(("invalid FTM event length:%d\n", ltoh16(p_event->len)));
+		ret = -EINVAL;
+		goto exit;
+	}
 	tlvs_len = ltoh16(p_event->len) - OFFSETOF(wl_proxd_event_t, tlvs);
 	DHD_RTT(("receive '%s' event: version=0x%x len=%d method=%d sid=%d tlvs_len=%d\n",
 		p_loginfo->text,
@@ -2036,7 +2070,8 @@ dhd_rtt_enable_responder(dhd_pub_t *dhd, wifi_channel_info *channel_info )
 	DHD_RTT(("Enter %s \n",__FUNCTION__));
 	/* turn off mpc in case of non-associted */
 	if (!dhd_is_associated(dhd, NULL, NULL)) {
-		err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc, sizeof(mpc), 1);
+		err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc, sizeof(mpc), NULL,
+				0, TRUE);
 		if (err) {
 			DHD_ERROR(("%s : failed to set mpc\n", __FUNCTION__));
 			goto exit;
@@ -2056,6 +2091,7 @@ dhd_rtt_enable_responder(dhd_pub_t *dhd, wifi_channel_info *channel_info )
 		}
 	}
 	/* Need to set PM=0 if STA is going to set as responder. */
+	rtt_status->pm = PM_OFF;
 	err = wldev_ioctl(dev, WLC_GET_PM, &rtt_status->pm, sizeof(rtt_status->pm), false);
 	DHD_RTT(("Current PM value read %d\n", rtt_status->pm));
 	if (err) {
@@ -2103,7 +2139,8 @@ exit:
 			/* enable mpc again in case of error */
 			mpc = 1;
 			rtt_status->mpc = 0;
-			err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc, sizeof(mpc), 1);
+			err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc,
+					sizeof(mpc), NULL, 0, TRUE);
 		}
 		DHD_RTT(("restoring the PM value \n"));
 		if (rtt_status->pm_restore) {
@@ -2144,7 +2181,8 @@ dhd_rtt_cancel_responder(dhd_pub_t *dhd)
 		/* enable mpc again in case of cancelling responder */
 		mpc = 1;
 		rtt_status->mpc = 0;
-		err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc, sizeof(mpc), 1);
+		err = dhd_iovar(dhd, 0, "mpc", (char *)&mpc, sizeof(mpc), NULL,
+				0, TRUE);
 	}
 	if (rtt_status->pm_restore) {
 		pm = PM_FAST;
