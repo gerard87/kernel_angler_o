@@ -332,7 +332,7 @@ static int put_v4l2_create32(struct v4l2_create_buffers __user *kp, struct v4l2_
 
 struct v4l2_standard32 {
 	__u32		     index;
-	compat_u64	     id;
+	__u32		     id[2];
 	__u8		     name[24];
 	struct v4l2_fract    frameperiod; /* Frames, not fields */
 	__u32		     framelines;
